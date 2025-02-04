@@ -4,6 +4,8 @@ import subprocess
 import re
 from openai import OpenAI
 from typing import Optional, Annotated
+from fastapi import FastAPI, HTTPException, Query
+import requests
 
 # Constants
 UPLOAD_DIR = "modified_tex"
@@ -12,9 +14,11 @@ DOWNLOAD_FOLDER = "downloads"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(DOWNLOAD_FOLDER, exist_ok=True)
 os.makedirs(UPLOAD_DIR, exist_ok=True)
+OPENAI_API_KEY="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"
+
 
 client = OpenAI(
-    api_key=os.environ.get("OPENAI_API_KEY"),  # This is the default and can be omitted
+    api_key=OPENAI_API_KEY # This is the default and can be omitted
 )
 api_router = APIRouter()
 
@@ -29,7 +33,7 @@ def convert_to_pdf(tex_filepath):
     pdf_filepath = os.path.join(DOWNLOAD_FOLDER, pdf_filename)
 
     try:
-        pdflatex_path = "C:\\Program Files\\MiKTeX\\miktex\\bin\\x64\\pdflatex.exe"  # Update for your OS
+        pdflatex_path = "C:\\Program Files\\MiKTeX\\miktex\\bin\\x64\\pdflatex.exe"  # Update for my  window
         subprocess.run([pdflatex_path, "-output-directory", DOWNLOAD_FOLDER, tex_filepath], check=True)
         print(f"✅ PDF successfully generated: {pdf_filepath}")
     except subprocess.CalledProcessError as e:
@@ -154,3 +158,40 @@ async def process_tex(
 
     except Exception as e:
         return {"error": str(e)}
+
+
+
+
+
+# ✅ API Endpoint to Compile LaTeX File from a URL
+@api_router.get("/compile")
+async def compile_latex(
+    # url: str = Query(..., description="URL to the LaTeX (.tex) file")
+    ):
+    try:
+        url = "https://github.com/mayanksahu17/FastAPI-resumeai-/blob/main/modified_tex/main(15).tex"
+        # Define the LaTeX compilation service URL
+        latex_compile_url = f"https://latexonline.cc/compile?url={url}"
+
+        # ✅ Send request to compile LaTeX
+        response =  requests.get(latex_compile_url, stream=True)
+        print("response",response)
+
+        # ✅ Handle errors from the LaTeX API
+        if response.status_code != 200:
+            raise HTTPException(status_code=response.status_code, detail="Failed to compile LaTeX file.")
+
+        # ✅ Save the compiled PDF file
+        pdf_filename = "compiled_resume.pdf"
+        with open(pdf_filename, "wb") as pdf_file:
+            for chunk in response.iter_content(chunk_size=1024):
+                pdf_file.write(chunk)
+
+        return {
+            "message": "LaTeX file compiled successfully!",
+            "download_url": f"http://localhost:8000/download/{pdf_filename}"
+        }
+
+    except requests.RequestException as e:
+        print(e)
+        raise HTTPException(status_code=500, detail=f"Request failed: {str(e)}")
