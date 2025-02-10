@@ -2,7 +2,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from config import settings
 from api import api_router
-
+import os
+import subprocess
 app = FastAPI(title=settings.PROJECT_NAME)
 
 # CORS मिडलवेयर सेटअप
@@ -13,6 +14,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
 
 # होम रूट चेक करने के लिए
 @app.get("/")

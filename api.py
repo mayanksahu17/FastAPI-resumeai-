@@ -14,13 +14,12 @@ DOWNLOAD_FOLDER = "downloads"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(DOWNLOAD_FOLDER, exist_ok=True)
 os.makedirs(UPLOAD_DIR, exist_ok=True)
-OPENAI_API_KEY="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"
-
 
 client = OpenAI(
-    api_key=OPENAI_API_KEY # This is the default and can be omitted
+    api_key="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" # This is the default and can be omitted
 )
 api_router = APIRouter()
+
 
 # ✅ Test Route
 @api_router.get("/test")
@@ -93,7 +92,7 @@ def modify_section(section_content, job_description, section_type):
     ]
 
     response = client.chat.completions.create(
-        model="gpt-3.5",
+        model="gpt-4o",
         messages=messages,
         max_tokens=1500
     )
@@ -161,37 +160,3 @@ async def process_tex(
 
 
 
-
-
-# ✅ API Endpoint to Compile LaTeX File from a URL
-@api_router.get("/compile")
-async def compile_latex(
-    # url: str = Query(..., description="URL to the LaTeX (.tex) file")
-    ):
-    try:
-        url = "https://github.com/mayanksahu17/FastAPI-resumeai-/blob/main/modified_tex/main(15).tex"
-        # Define the LaTeX compilation service URL
-        latex_compile_url = f"https://latexonline.cc/compile?url={url}"
-
-        # ✅ Send request to compile LaTeX
-        response =  requests.get(latex_compile_url, stream=True)
-        print("response",response)
-
-        # ✅ Handle errors from the LaTeX API
-        if response.status_code != 200:
-            raise HTTPException(status_code=response.status_code, detail="Failed to compile LaTeX file.")
-
-        # ✅ Save the compiled PDF file
-        pdf_filename = "compiled_resume.pdf"
-        with open(pdf_filename, "wb") as pdf_file:
-            for chunk in response.iter_content(chunk_size=1024):
-                pdf_file.write(chunk)
-
-        return {
-            "message": "LaTeX file compiled successfully!",
-            "download_url": f"http://localhost:8000/download/{pdf_filename}"
-        }
-
-    except requests.RequestException as e:
-        print(e)
-        raise HTTPException(status_code=500, detail=f"Request failed: {str(e)}")
