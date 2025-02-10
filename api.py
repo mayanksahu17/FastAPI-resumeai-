@@ -5,7 +5,7 @@ import re
 from openai import OpenAI
 from typing import Optional, Annotated
 from fastapi import FastAPI, HTTPException, Query
-import requests
+
 
 # Constants
 UPLOAD_DIR = "modified_tex"
