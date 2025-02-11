@@ -4,9 +4,13 @@ from config import settings
 from api import api_router
 import os
 import subprocess
+from fastapi import FastAPI, Request
+from fastapi.templating import Jinja2Templates
+from fastapi.responses import HTMLResponse
 app = FastAPI(title=settings.PROJECT_NAME)
 
-# CORS मिडलवेयर सेटअप
+templates = Jinja2Templates(directory="templates")
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -17,10 +21,8 @@ app.add_middleware(
 
 
 
-# होम रूट चेक करने के लिए
-@app.get("/")
-def read_root():
-    return {"message": "Server is up and running 🚀"}
+@app.get("/", response_class=HTMLResponse)
+def read_root(request: Request):
+    return templates.TemplateResponse("index.html", {"request": request})
 
-# API राउटर इन्क्लूड करना
 app.include_router(api_router, prefix=settings.API_V1_STR)

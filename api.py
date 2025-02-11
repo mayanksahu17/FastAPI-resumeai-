@@ -1,10 +1,15 @@
-from fastapi import APIRouter, UploadFile, File, Form
+from fastapi import APIRouter, UploadFile, File, Form, BackgroundTasks
 import os
 import subprocess
 import re
 from openai import OpenAI
+from fastapi.responses import FileResponse
 from typing import Optional, Annotated
 from fastapi import FastAPI, HTTPException, Query
+import cloudinary
+import cloudinary.uploader
+from datetime import datetime 
+from config import client , cloudinary , get_pdflatex_path
 
 
 # Constants
@@ -15,16 +20,57 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(DOWNLOAD_FOLDER, exist_ok=True)
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-client = OpenAI(
-    api_key="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" # This is the default and can be omitted
-)
-api_router = APIRouter()
+# client = OpenAI(
+#     api_key="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" # This is the default and can be omitted
+# )
 
+api_router = APIRouter()
 
 # ✅ Test Route
 @api_router.get("/test")
 def test_route():
     return {"message": "API is working perfectly!"}
+
+
+
+ALLOWED_EXTENSIONS = {'pdf'}
+
+
+
+def cleanup_files(file_paths: list[str]):
+    """Background task to clean up generated files"""
+    for file_path in file_paths:
+        try:
+            if os.path.exists(file_path):
+                os.remove(file_path)
+        except Exception:
+            pass  # Ignore cleanup errors
+
+
+
+def upload_to_cloudinary(file):
+    """Uploads a file to Cloudinary and returns the secure URL and public ID."""
+    try:
+        upload_result = cloudinary.uploader.upload(
+            file,
+            resource_type="raw"  # Ensure PDFs are treated as raw files
+        )
+        print(upload_result)
+        return upload_result.get("secure_url"), upload_result.get("public_id")
+    except Exception as e:
+        raise Exception(f"Error uploading to Cloudinary: {str(e)}")
+
+def allowed_resume(filename):
+    """Check if the uploaded file is of an allowed type."""
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+
+def date_time_now():
+    """Return the current date and time in a readable format."""
+    now = datetime.now()
+    return now.strftime("%d/%m/%Y %H:%M:%S")
+
+
 
 # ✅ Function to Convert .tex to PDF
 def convert_to_pdf(tex_filepath):
@@ -122,8 +168,10 @@ def replace_section(original_content, old_section, new_section):
     return original_content.replace(old_section, new_section)
 
 # ✅ API Endpoint to Process LaTeX File and Modify Work Experience & Skills
+
 @api_router.post("/process_tex")
 async def process_tex(
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     job_description: Optional[str] = Form(None)
 ):
@@ -141,22 +189,81 @@ async def process_tex(
         modified_skills = modify_section(extracted_skills, job_description, "skills")
 
         # Replace Sections in Original LaTeX
-       
         updated_latex = replace_section(latex_content, extracted_work_experience, modified_work_experience)
         updated_latex = replace_section(updated_latex, extracted_skills, modified_skills)
 
         # Save Modified LaTeX File
-        modified_tex_path = os.path.join(UPLOAD_DIR, file.filename)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        tex_filename = f"resume_{timestamp}.tex"
+        modified_tex_path = os.path.join(UPLOAD_DIR, tex_filename)
+        
         with open(modified_tex_path, "w", encoding="utf-8") as modified_tex:
             modified_tex.write(updated_latex)
 
-        return {
-            "message": "LaTeX file processed and modified successfully according to the job description.",
-            "modified_tex_path": modified_tex_path
-        }
+        # Compile LaTeX to PDF
+        try:
 
+               # Get the appropriate pdflatex path
+            pdflatex_path = get_pdflatex_path()
+            
+            # Check if pdflatex exists
+            if not os.path.exists(pdflatex_path):
+                raise HTTPException(
+                    status_code=500,
+                    detail="pdflatex not found. Please install TeX Live on Ubuntu using: sudo apt-get install texlive-full"
+                )
+            
+            process = subprocess.run(
+                [pdflatex_path, "-output-directory", UPLOAD_DIR, modified_tex_path],
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+        
+            # Get the generated PDF path
+            pdf_filename = tex_filename.replace('.tex', '.pdf')
+            pdf_path = os.path.join(UPLOAD_DIR, pdf_filename)
+            
+            if not os.path.exists(pdf_path):
+                raise HTTPException(status_code=500, detail="PDF generation failed")
+
+            # Prepare list of files to cleanup
+            cleanup_file_paths = [
+                os.path.join(UPLOAD_DIR, f"{os.path.splitext(tex_filename)[0]}.aux"),
+                os.path.join(UPLOAD_DIR, f"{os.path.splitext(tex_filename)[0]}.log"),
+                os.path.join(UPLOAD_DIR, f"{os.path.splitext(tex_filename)[0]}.out"),
+                modified_tex_path,
+                pdf_path  # Add PDF to cleanup after sending
+            ]
+            
+            # Add cleanup task to background tasks
+            background_tasks.add_task(cleanup_files, cleanup_file_paths)
+            
+            return FileResponse(
+                path=pdf_path,
+                filename=pdf_filename,
+                media_type="application/pdf"
+            )
+
+        except subprocess.CalledProcessError as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"LaTeX compilation failed: {e.stderr}"
+            )
+            
     except Exception as e:
-        return {"error": str(e)}
-
-
-
+        # Clean up any files that might have been created before the error
+        if 'tex_filename' in locals():
+            cleanup_paths = [
+                os.path.join(UPLOAD_DIR, f"{os.path.splitext(tex_filename)[0]}.aux"),
+                os.path.join(UPLOAD_DIR, f"{os.path.splitext(tex_filename)[0]}.log"),
+                os.path.join(UPLOAD_DIR, f"{os.path.splitext(tex_filename)[0]}.pdf"),
+                os.path.join(UPLOAD_DIR, tex_filename)
+            ]
+            cleanup_files(cleanup_paths)
+            
+        raise HTTPException(
+            status_code=500,
+            detail=str(e)
+        )
